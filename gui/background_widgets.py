@@ -14,8 +14,12 @@ def dot_in_polar(angle, length):
     return [length * f(radians(angle)) for f in (cos, sin)]
 
 
+constraint = numpy.vectorize(
+    lambda val, min_val, max_val: min_val if val < min_val else max_val if val > max_val else val)
+
+
 class NeuralBackground(Widget):
-    NEURONS_COUNT = 10
+    NEURONS_COUNT = 3
 
     def redraw(self, dt):
         self.canvas.clear()
@@ -24,7 +28,7 @@ class NeuralBackground(Widget):
             Rectangle(pos=self.pos, size=self.size)  # color background
 
             for neuron in self.neurons:
-                neuron.adjust_size(self.size, delta_time=dt)
+                neuron.window_size = self.size
                 neuron.render(delta_time=dt)
                 neuron.draw()
 
@@ -47,6 +51,7 @@ class DrawnNeuron:
     MIN_RECONNECT_TIME = 5
     MAX_RECONNECT_TIME = 20
     MAX_CONNECTIONS = 4
+    MAX_SPEED = 80
 
     class ConnectionState:
         def __init__(self, neuron_1, neuron_2):
@@ -61,22 +66,22 @@ class DrawnNeuron:
 
     def __init__(self, all_neurons):
 
-        self.pos = numpy.zeros((2, 1))
-        self.window_size = numpy.zeros((2, 1))
+        self.pos = numpy.zeros((2, 1), dtype="float64")
+        self._window_size = numpy.zeros((2, 1))
 
         self.size = 0
-        self.rel_size = 0.05+0.35*random()  # size relatively to window
+        self.rel_size = 0.05 + 0.35 * random()  # size relatively to window
 
         self.rotation = 0
         self.rotation_speed = 0.5 * (1 + random())
-        self.velocity = numpy.random.randint(0, 5, (2, 1))
+        self.velocity = numpy.zeros((2, 1), dtype="float64")
 
         self.connection_states = {}
         self._reconnect_timer = 0
         self._neural_points = []
         for an in range(int(DrawnNeuron.DOTS_IN_CIRCLE)):
             self._neural_points.append(dot_in_polar(360 * an / (DrawnNeuron.DOTS_IN_CIRCLE - 1),
-                                                    DrawnNeuron.DOTS_IN_CIRCLE*(0.8+0.2*random())))
+                                                    DrawnNeuron.DOTS_IN_CIRCLE * (0.8 + 0.2 * random())))
 
         for each_neuron in all_neurons:
             # i'm a new member - and i'll create connection with already existing neuron
@@ -85,9 +90,25 @@ class DrawnNeuron:
             each_neuron.connection_states[self] = new_connection  # store to him
         pass
 
+    def intersect(self, another_neuron):
+        return sum((self.pos-another_neuron.pos)**2) < self.size+another_neuron.size
+
+    def run_away_vector(self, another_neuron):
+        return (self.size+another_neuron.size) - (another_neuron.pos - self.pos)
+
     def render(self, delta_time):
+        self.size = DrawnNeuron.DOTS_IN_CIRCLE
+
         self.rotation += delta_time * self.rotation_speed
-        # self.pos += self.velocity
+        self.velocity = numpy.add(self.velocity, 0.5*(self.window_size / 2 - self.pos))
+
+        for each_neuron in self.connection_states.keys():
+            if self.intersect(each_neuron):
+                self.velocity = numpy.add(self.velocity, 0.8*self.run_away_vector(each_neuron))
+                pass
+
+        self.velocity = constraint(self.velocity, -DrawnNeuron.MAX_SPEED, DrawnNeuron.MAX_SPEED)
+        self.pos += self.velocity*delta_time
 
         for another_neuron, connection_state in self.connection_states.items():
             connection_state.update(delta_time)
@@ -106,13 +127,7 @@ class DrawnNeuron:
             self._reconnect_timer -= delta_time
             pass
 
-    def adjust_size(self, window_size, delta_time):
-        for n in range(2):
-            self.pos[n] = lerp(self.pos[n], window_size[n] * self._relative_pos[n], delta_time)
-        self.size = max(window_size) * self._relative_size
-
     def draw(self):
-
         PushMatrix()
         Translate(self.pos[0], self.pos[1])
         Rotate(angle=self.rotation * pi)
@@ -126,3 +141,12 @@ class DrawnNeuron:
                 Line(points=(list(self.pos), another_neuron.pos), width=4 * connection_state.connection_progress)
 
         pass
+
+    def get_window_size(self):
+        return self._window_size
+
+    def set_window_size(self, size):
+        for n in range(2):
+            self._window_size[n] = size[n]
+
+    window_size = property(get_window_size, set_window_size)

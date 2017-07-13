@@ -5,6 +5,7 @@ from math import sin, cos, pi, radians
 from random import random, choice, randint, randrange
 import numpy
 
+
 def lerp(min_val, max_val, percent):
     return min_val + (max_val - min_val) * percent
 
@@ -33,13 +34,7 @@ class NeuralBackground(Widget):
         Widget.__init__(self, **kwargs)
         self.neurons = []
         for i in range(NeuralBackground.NEURONS_COUNT):
-            # keeps spawn position away from window corners
-            def constraint_random():
-                return 0.15 + 0.7 * random()
-
-            self.neurons.append(DrawnNeuron(rel_position=(constraint_random(), constraint_random()),
-                                            rel_size=random() / 20,
-                                            all_neurons=self.neurons))
+            self.neurons.append(DrawnNeuron(all_neurons=self.neurons))
 
         Clock.schedule_interval(lambda dt: self.redraw(dt), 1 / 60.)
         pass
@@ -64,17 +59,13 @@ class DrawnNeuron:
             self.connection_progress = lerp(self.connection_progress, 1 if self.is_connected else 0,
                                             self.connect_speed * delta_time)
 
-    def __init__(self, rel_position, rel_size, all_neurons):
-        if len(rel_position) != 2:
-            raise ValueError("%s is invalid position!" % rel_position)
-        if type(rel_size) not in [float, int]:
-            raise TypeError("%s is invalid size!" % rel_position)
+    def __init__(self, all_neurons):
 
-        self._relative_pos = rel_position
         self.pos = numpy.zeros((2, 1))
+        self.window_size = numpy.zeros((2, 1))
 
-        self._relative_size = rel_size
         self.size = 0
+        self.rel_size = 0.05+0.35*random()  # size relatively to window
 
         self.rotation = 0
         self.rotation_speed = 0.5 * (1 + random())
@@ -97,7 +88,7 @@ class DrawnNeuron:
     def render(self, delta_time):
         self.rotation += delta_time * self.rotation_speed
         # self.pos += self.velocity
-        
+
         for another_neuron, connection_state in self.connection_states.items():
             connection_state.update(delta_time)
 

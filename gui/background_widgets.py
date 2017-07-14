@@ -1,9 +1,10 @@
 from kivy.clock import Clock
-from kivy.graphics import Color, Rectangle, Line, Translate, Rotate, PushMatrix, PopMatrix
+from kivy.graphics import Color, Rectangle, Line, Translate, Ellipse, PushMatrix, PopMatrix
 from kivy.uix.widget import Widget
 from math import sin, cos, pi, radians
 from random import random, choice, randint, randrange
 import numpy
+import pymunk
 
 
 def lerp(min_val, max_val, percent):
@@ -19,9 +20,23 @@ constraint = numpy.vectorize(
 
 
 class NeuralBackground(Widget):
-    NEURONS_COUNT = 3
+    NEURONS_COUNT = 100
 
     def redraw(self, dt):
+
+        static_lines = [
+            pymunk.Segment(self.space.static_body, a, b, radius=1)
+            for a, b in [
+                [(0, 0), (self.size[0], 0)],  # bottom
+                [(0, 0), (0, self.size[1])],  # left
+                [(0, self.size[1]), (self.size[0], self.size[1])],  # top
+                [(self.size[0], 0), (self.size[0], self.size[1])],  # right
+            ]
+        ]
+
+        self.space.add(static_lines)
+
+        self.space.step(dt)
         self.canvas.clear()
         with self.canvas:
             Color(0xC9 / 255, 0xFF / 255, 0xE5 / 255)
@@ -33,12 +48,19 @@ class NeuralBackground(Widget):
                 neuron.draw()
 
             pass
+        self.space.remove(static_lines)
 
     def __init__(self, **kwargs):
         Widget.__init__(self, **kwargs)
+
+        self.space = pymunk.Space()
+        self.space.damping = 0.99
+
         self.neurons = []
         for i in range(NeuralBackground.NEURONS_COUNT):
-            self.neurons.append(DrawnNeuron(all_neurons=self.neurons))
+            new_neuron = DrawnNeuron(all_neurons=self.neurons)
+            self.space.add(new_neuron.body, new_neuron.shape)
+            self.neurons.append(new_neuron)
 
         Clock.schedule_interval(lambda dt: self.redraw(dt), 1 / 60.)
         pass
@@ -66,15 +88,10 @@ class DrawnNeuron:
 
     def __init__(self, all_neurons):
 
-        self.pos = numpy.zeros((2, 1), dtype="float64")
         self._window_size = numpy.zeros((2, 1))
-
-        self.size = 0
         self.rel_size = 0.05 + 0.35 * random()  # size relatively to window
 
-        self.rotation = 0
         self.rotation_speed = 0.5 * (1 + random())
-        self.velocity = numpy.zeros((2, 1), dtype="float64")
 
         self.connection_states = {}
         self._reconnect_timer = 0
@@ -88,27 +105,14 @@ class DrawnNeuron:
             new_connection = DrawnNeuron.ConnectionState(self, each_neuron)
             self.connection_states[each_neuron] = new_connection  # store to myself
             each_neuron.connection_states[self] = new_connection  # store to him
+
+        self.body = pymunk.Body(1, 1500)
+        self.body.position = 50, 50  # to force it go into the center
+        self.shape = pymunk.Circle(body=self.body, radius=50)
+        self.shape.elasticity = 0.9999999
         pass
 
-    def intersect(self, another_neuron):
-        return sum((self.pos-another_neuron.pos)**2) < self.size+another_neuron.size
-
-    def run_away_vector(self, another_neuron):
-        return (self.size+another_neuron.size) - (another_neuron.pos - self.pos)
-
     def render(self, delta_time):
-        self.size = DrawnNeuron.DOTS_IN_CIRCLE
-
-        self.rotation += delta_time * self.rotation_speed
-        self.velocity = numpy.add(self.velocity, 0.5*(self.window_size / 2 - self.pos))
-
-        for each_neuron in self.connection_states.keys():
-            if self.intersect(each_neuron):
-                self.velocity = numpy.add(self.velocity, 0.8*self.run_away_vector(each_neuron))
-                pass
-
-        self.velocity = constraint(self.velocity, -DrawnNeuron.MAX_SPEED, DrawnNeuron.MAX_SPEED)
-        self.pos += self.velocity*delta_time
 
         for another_neuron, connection_state in self.connection_states.items():
             connection_state.update(delta_time)
@@ -117,9 +121,10 @@ class DrawnNeuron:
             for another_neuron, connection_state in self.connection_states.items():
                 connection_state.is_connected = False
 
-            for i in range(randrange(DrawnNeuron.MAX_CONNECTIONS)):
-                # it's ok to connect with some another neuron twice. Who cares, amount is random anyway
-                choice(list(self.connection_states.values())).is_connected = True
+            if len(self.connection_states) > 1:
+                for i in range(randrange(DrawnNeuron.MAX_CONNECTIONS)):
+                    # it's ok to connect with some another neuron twice. Who cares, amount is random anyway
+                    choice(list(self.connection_states.values())).is_connected = True
 
             self._reconnect_timer = randint(DrawnNeuron.MIN_RECONNECT_TIME, DrawnNeuron.MAX_RECONNECT_TIME)
             pass
@@ -128,13 +133,15 @@ class DrawnNeuron:
             pass
 
     def draw(self):
+
         PushMatrix()
-        Translate(self.pos[0], self.pos[1])
-        Rotate(angle=self.rotation * pi)
+        Translate(self.body.position[0], self.body.position[1])
+        # Rotate(angle=self.rotation * pi)
         Color(0, 0, 0)
 
         Line(points=self._neural_points, width=2, close=True)
         PopMatrix()
+        return
 
         for another_neuron, connection_state in self.connection_states.items():
             if connection_state.connection_progress != 0:

@@ -1,6 +1,7 @@
 from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle, Line, Translate, Rotate, PushMatrix, PopMatrix
 from kivy.uix.widget import Widget
+from kivy.core.window import Window, WindowBase
 from math import sin, cos, pi, radians
 from random import random, choice, randint, randrange
 import numpy
@@ -23,37 +24,38 @@ space = pymunk.Space()
 
 class NeuralBackground(Widget):
     NEURONS_COUNT = 5
-    BORDER_OFFSET = 20
+    BORDER_OFFSET = 20  # distance at which neurons can't come closer to borders or the window
 
     def __init__(self, **kwargs):
         Widget.__init__(self, **kwargs)
 
         space.damping = 0.99
-        self.space = space
 
         self.neurons = []
         for i in range(NeuralBackground.NEURONS_COUNT):
             new_neuron = DrawnNeuron(all_neurons=self.neurons)
-            self.space.add(new_neuron.body, new_neuron.shape)
+            space.add(new_neuron.body, new_neuron.shape)
             self.neurons.append(new_neuron)
 
         Clock.schedule_interval(lambda dt: self.redraw(dt), 1 / 60.)
 
     def redraw(self, dt):
+        for n in range(2):
+            self.size[n] = max(self.size[n], 100)
 
         static_lines = [
-            pymunk.Segment(self.space.static_body, a, b, radius=1)
+            pymunk.Segment(space.static_body, a, b, radius=1)
             for a, b in [
                 [(0, 0), (self.size[0], 0)],  # bottom
-                [(0, 0), (0, self.size[1])],  # left
+                [(0, 0), (0, max(100, self.size[1]))],  # left
                 [(0, self.size[1]), (self.size[0], self.size[1])],  # top
                 [(self.size[0], 0), (self.size[0], self.size[1])],  # right
             ]
         ]
 
-        self.space.add(static_lines)
+        space.add(static_lines)
 
-        self.space.step(dt)
+        space.step(dt)
         self.canvas.clear()
         with self.canvas:
             Color(0xC9 / 255, 0xFF / 255, 0xE5 / 255)
@@ -65,11 +67,11 @@ class NeuralBackground(Widget):
                 neuron.draw()
 
             pass
-        self.space.remove(static_lines)
+        space.remove(static_lines)
 
 
 class DrawnNeuron:
-    DOTS_IN_CIRCLE = 50
+    DOTS_IN_CIRCLE = 30
     MIN_RECONNECT_TIME = 5
     MAX_RECONNECT_TIME = 20
     MAX_CONNECTIONS = 3
@@ -78,13 +80,17 @@ class DrawnNeuron:
 
     class ConnectionState:
         def __init__(self, neuron_1, neuron_2):
+            joints_count = 3
+
             self.connected_neurons = (neuron_1, neuron_2)
             self._is_connected = False
             self.connection_progress = 0.0
             self.connect_speed = 4
-            self.joint = pymunk.DampedSpring(neuron_1.body, neuron_2.body, (0, 0), (0, 0), rest_length=100,
-                                             stiffness=5, damping=2)
-            # self.joint = pymunk.PinJoint(neuron_1.body, neuron_2.body)
+            self.joints = [pymunk.DampedSpring(neuron_1.body, neuron_2.body,
+                                               (n * 50 / joints_count, n * 50 / joints_count),
+                                               (n * 50 / joints_count, n * 50 / joints_count),
+                                               rest_length=200, stiffness=5, damping=5)
+                           for n in range(joints_count)]
 
         def update(self, delta_time):
             self.connection_progress = lerp(self.connection_progress, 1 if self._is_connected else 0,
@@ -96,31 +102,34 @@ class DrawnNeuron:
         def set_connected(self, is_connected):
             self._is_connected = is_connected
             if is_connected:
-                if self.joint not in space.constraints:
-                    space.add(self.joint)
+                for joint in self.joints:
+                    if joint not in space.constraints:
+                        space.add(joint)
             else:
-                if self.joint in space.constraints:
-                    space.remove(self.joint)
+                for joint in self.joints:
+                    if joint in space.constraints:
+                        space.remove(joint)
             pass
 
         is_connected = property(is_connected, set_connected)
 
     def __init__(self, all_neurons):
         self._window_size = numpy.zeros((2, 1))
-        self.rel_size = 0.05 + 0.35 * random()  # size relatively to window
 
+        self._size = 0
         self.body = pymunk.Body(1, 1500)
         self.body.position = 50, 50  # to force it go into the center
-        self.shape = pymunk.Circle(body=self.body, radius=50)
+        self.shape = pymunk.Circle(body=self.body, radius=self._size)
         self.shape.elasticity = 0
         self.shape.friction = 0.2
 
         self.connection_states = {}
         self._reconnect_timer = 0
+        self._neural_shape_lengths = []
         self._neural_points = []
         for an in range(int(DrawnNeuron.DOTS_IN_CIRCLE)):
-            self._neural_points.append(dot_in_polar(360 * an / (DrawnNeuron.DOTS_IN_CIRCLE - 1),
-                                                    DrawnNeuron.DOTS_IN_CIRCLE * (0.8 + 0.2 * random())))
+            self._neural_shape_lengths.append(0.8 + 0.2 * random())
+            self._neural_points.append(dot_in_polar(0, 0))
 
         for each_neuron in all_neurons:
             # i'm a new member - and i'll create connection with already existing neuron
@@ -139,7 +148,14 @@ class DrawnNeuron:
         self.body.apply_force_at_world_point(center_force, (0, 0))
 
         self.body.position = [constraint(self.body.position[n], NeuralBackground.BORDER_OFFSET,
-                                         self.window_size[n] - NeuralBackground.BORDER_OFFSET) for n in range(2)]
+                                         max(100, self.window_size[n]) - NeuralBackground.BORDER_OFFSET)
+                              for n in range(2)]
+
+        self._size = lerp(self._size, self.window_size[0] / 20, delta_time)
+        self.shape.unsafe_set_radius(self._size)
+        for n in range(DrawnNeuron.DOTS_IN_CIRCLE):
+            self._neural_points[n] = dot_in_polar(360 * n / (DrawnNeuron.DOTS_IN_CIRCLE - 1),
+                                                  self._size * self._neural_shape_lengths[n])
 
         for another_neuron, connection_state in self.connection_states.items():
             connection_state.update(delta_time)

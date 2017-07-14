@@ -1,4 +1,3 @@
-import kivy.graphics as graph
 from kivy.app import App
 from kivy.core.window import Window
 from gui.background_widgets import NeuralBackground

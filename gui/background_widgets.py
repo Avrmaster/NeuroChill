@@ -30,7 +30,7 @@ class NeuralBackground(Widget):
     def __init__(self, **kwargs):
         Widget.__init__(self, **kwargs)
 
-        space.damping = 0.99
+        # space.damping = 0.99
 
         self.neurons = []
         for i in range(NeuralBackground.NEURONS_COUNT):
@@ -56,7 +56,7 @@ class NeuralBackground(Widget):
 
         space.add(static_lines)
 
-        space.step(dt)
+        space.step(dt/5)
         self.canvas.clear()
         with self.canvas:
             Color(0xC9 / 255, 0xFF / 255, 0xE5 / 255)
@@ -75,7 +75,7 @@ class DrawnNeuron:
     DOTS_IN_CIRCLE = 50
     MIN_RECONNECT_TIME = 5
     MAX_RECONNECT_TIME = 20
-    MAX_CONNECTIONS = 3
+    MAX_CONNECTIONS = 4
     MAX_SPEED = 80
     MAX_FORCE = 5
 
@@ -127,6 +127,9 @@ class DrawnNeuron:
         self.shape.elasticity = 0
         self.shape.friction = 0.2
 
+        self.surface_beam_angles = []
+        self.init_beam_angles()
+
         self.connection_states = {}
         self._reconnect_timer = 0
         self._neural_shape_lengths = []
@@ -169,6 +172,7 @@ class DrawnNeuron:
                     choice(list(self.connection_states.values())).is_connected = True
                     pass
 
+            self.init_beam_angles()
             self._reconnect_timer = randint(DrawnNeuron.MIN_RECONNECT_TIME, DrawnNeuron.MAX_RECONNECT_TIME)
             pass
         else:
@@ -185,12 +189,19 @@ class DrawnNeuron:
             for i in range(2):
                 self._neural_points[n][i] = lerp(self._neural_points[n][i], goal_dot[i], delta_time)
 
+    def init_beam_angles(self):
+        self.surface_beam_angles = []
+        for n in range(randint(3, 8)):
+            self.surface_beam_angles.append(randrange(DrawnNeuron.DOTS_IN_CIRCLE))
+
     def init_neural_shape(self):
         self._neural_shape_lengths = []
 
         for an in range(int(DrawnNeuron.DOTS_IN_CIRCLE)):
-            self._neural_shape_lengths.append(0.6 + 0.2 * random())
-            # self._neural_shape_lengths.append(0.8)
+            self._neural_shape_lengths.append(0.2)
+        for beam in self.surface_beam_angles:
+            for n in range(5):
+                self._neural_shape_lengths[beam % DrawnNeuron.DOTS_IN_CIRCLE] = 0.6 + 0.2 * sin(n*pi/5)
 
         angle = -self.body.angle
         if angle < 0:
@@ -222,7 +233,7 @@ class DrawnNeuron:
         Color(0, 0, 0)
 
         # Line(points=(0, 0, self.size, 0), width=1)
-        Line(points=self._neural_points, width=2, close=True)
+        Line(points=self._neural_points, width=0.5, close=True)
         PopMatrix()
 
         # for another_neuron, connection_state in self.connection_states.items():
